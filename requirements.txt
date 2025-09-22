@@ -1,0 +1,4 @@
+PyQt6>=6.0.0
+psutil>=5.8.0
+qdarkstyle>=3.0.0
+qdarktheme>=2.0.0

@@ -3662,13 +3662,16 @@ def main():
 
     # Handle autostart mode
     if args.autostart:
-        print("🚀 Starting in autostart mode (background monitoring)")
-        # Don't show the GUI, just start background monitoring
+        print("🚀 Starting in autostart mode (background monitoring with system tray)")
+        # Start system tray even in autostart mode for user control
+        window.setup_system_tray()
+        
+        # Don't show the main GUI, just start background monitoring  
         if window.settings.get('enabled', True):
             window.start_automatic_monitoring()
-            print("✅ Background monitoring started")
+            print("✅ Background monitoring started with system tray")
         else:
-            print("⚠️ Screensaver disabled - no monitoring started")
+            print("⚠️ Screensaver disabled - system tray available for settings")
     else:
         # Normal mode - show the GUI
         window.show()

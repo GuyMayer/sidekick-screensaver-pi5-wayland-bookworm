@@ -91,8 +91,8 @@ def test_github_api_access():
     print("🌐 Testing GitHub API access...")
 
     try:
-        # Test repository URL (you can customize this)
-        repo_url = "https://api.github.com/repos/GuyMayer/sidekick-screensaver/releases/latest"
+        # Test repository URL - linked to actual git repository
+        repo_url = "https://api.github.com/repos/GuyMayer/sidekick-screensaver-pi5-wayland-bookworm/releases/latest"
 
         # Create request with user agent
         request = urllib.request.Request(repo_url)

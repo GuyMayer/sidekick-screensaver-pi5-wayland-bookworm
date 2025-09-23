@@ -1283,8 +1283,8 @@ class ScreensaverPreferences(QMainWindow):
         try:
             print("🔄 Checking for Sidekick Screensaver updates...")
 
-            # Update repository information (you can customize this URL)
-            repo_url = "https://api.github.com/repos/GuyMayer/sidekick-screensaver/releases/latest"
+            # Update repository information - linked to actual git repository
+            repo_url = "https://api.github.com/repos/GuyMayer/sidekick-screensaver-pi5-wayland-bookworm/releases/latest"
             current_version = "3.0.0"  # Current version - update this when you release new versions
 
             # Create request with user agent
@@ -2399,7 +2399,7 @@ X-GNOME-Autostart-enabled=true
         # Determine screensaver type from saved settings (not GUI widgets)
         # This ensures it works both in GUI mode and autostart/background mode
         screensaver_type = None
-        
+
         if not self.settings.get('enabled', True):
             screensaver_type = 'None'
         elif self.settings.get('slideshow_mode', False):
@@ -2411,7 +2411,7 @@ X-GNOME-Autostart-enabled=true
         else:
             # Fallback to Matrix if no mode is set
             screensaver_type = 'Matrix'
-        
+
         print(f"🎯 Determined screensaver type from settings: {screensaver_type}")
         print(f"🔧 Settings state - matrix_mode: {self.settings.get('matrix_mode')}, mystify_mode: {self.settings.get('mystify_mode')}, slideshow_mode: {self.settings.get('slideshow_mode')}")
 

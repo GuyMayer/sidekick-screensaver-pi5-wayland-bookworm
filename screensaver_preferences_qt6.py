@@ -21,75 +21,8 @@ import json
 import subprocess
 import datetime
 import time
-import atexit
-import urllib.request
-import urllib.error
-import hashlib
-import threading
 from typing import Optional, Any, Union, List
 from pathlib import Path
-
-# Integrated Single Instance Protection
-try:
-    from filelock import Timeout, FileLock
-    FILELOCK_AVAILABLE = True
-except ImportError:
-    FILELOCK_AVAILABLE = False
-
-class SingleInstanceManager:
-    """Professional single instance manager with file locking"""
-    def __init__(self, app_name: str = "single_instance_app", lock_dir: Optional[str] = None):
-        self.app_name = app_name
-        self.lock_file = None
-        self.lock = None
-        self.is_locked = False
-        if lock_dir:
-            self.lock_dir = Path(lock_dir)
-        else:
-            if os.access("/tmp", os.W_OK):
-                self.lock_dir = Path("/tmp")
-            else:
-                self.lock_dir = Path.cwd()
-        self.lock_file_path = self.lock_dir / f"{self.app_name}.lock"
-        if FILELOCK_AVAILABLE:
-            self.lock = FileLock(str(self.lock_file_path))
-        else:
-            self.lock = None
-
-    def acquire_lock(self, timeout: float = 0.0) -> bool:
-        if not FILELOCK_AVAILABLE:
-            return True  # Allow multiple instances if filelock unavailable
-        if not self.lock:
-            return False
-        try:
-            self.lock.acquire(timeout=timeout)
-            self.is_locked = True
-            atexit.register(self.release_lock)
-            return True
-        except Timeout:
-            return False
-        except Exception:
-            return False
-
-    def release_lock(self):
-        if not self.is_locked or not self.lock:
-            return
-        try:
-            self.lock.release()
-            self.is_locked = False
-        except Exception:
-            pass
-
-def ensure_single_instance(app_name: str = "single_instance_app", exit_on_conflict: bool = True, timeout: float = 0.0) -> SingleInstanceManager:
-    """Ensure only one instance of the application runs"""
-    manager = SingleInstanceManager(app_name)
-    if manager.acquire_lock(timeout=timeout):
-        return manager
-    else:
-        if exit_on_conflict:
-            sys.exit(1)
-        else:
-            return manager
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                             QHBoxLayout, QGridLayout, QLabel, QPushButton,
                             QCheckBox, QComboBox, QSpinBox, QSlider, QGroupBox,
@@ -381,6 +314,51 @@ APP_VERSION = "3.0.0"
 BUILD_DATE = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 COMPILE_TIME = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
+class SingleInstanceChecker:
+    """Ensure only one instance of the GUI is running"""
+    def __init__(self):
+        self.lock_file = Path.home() / '.config' / 'screensaver' / '.gui_lock'
+        self.pid_file = Path.home() / '.config' / 'screensaver' / '.gui_pid'
+
+    def is_already_running(self) -> bool:
+        """Check if another instance is already running"""
+        if not self.pid_file.exists():
+            return False
+
+        try:
+            with open(self.pid_file, 'r') as f:
+                old_pid = int(f.read().strip())
+
+            # Check if process is still running
+            try:
+                os.kill(old_pid, 0)  # Doesn't actually kill, just checks if process exists
+                return True
+            except OSError:
+                # Process doesn't exist, remove stale files
+                self.cleanup()
+                return False
+        except (ValueError, FileNotFoundError):
+            self.cleanup()
+            return False
+
+    def create_lock(self):
+        """Create lock files for this instance"""
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_file.touch()
+
+        with open(self.pid_file, 'w') as f:
+            f.write(str(os.getpid()))
+
+    def cleanup(self):
+        """Remove lock files"""
+        try:
+            if self.lock_file.exists():
+                self.lock_file.unlink()
+            if self.pid_file.exists():
+                self.pid_file.unlink()
+        except:
+            pass
+
 class ScreensaverPreferences(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -388,8 +366,8 @@ class ScreensaverPreferences(QMainWindow):
         self.setGeometry(100, 100, 600, 800)
         self.setMaximumWidth(600)  # Limit window width to 600px
 
-        # Instance manager for single instance enforcement
-        self.instance_manager: Optional[SingleInstanceManager] = None  # Will be set by main()
+        # Instance checker for single instance enforcement
+        self.instance_checker: Optional[SingleInstanceChecker] = None  # Will be set by main()
 
         # Configuration file path
         self.config_dir = Path.home() / '.config' / 'screensaver'
@@ -434,11 +412,7 @@ class ScreensaverPreferences(QMainWindow):
             'mystify_color_hue2': 60,  # Duo mode second hue (yellow)
             'dark_mode': True,  # Enable dark mode by default
             'auto_shutdown': False,  # Enable automatic shutdown timer
-            'shutdown_timeout': 60,  # Minutes until automatic shutdown (default 1 hour)
-            'auto_update_check': True,  # Enable automatic monthly update checks
-            'last_update_check': '',  # Last update check timestamp (ISO format)
-            'update_check_frequency': 30,  # Days between update checks (default: monthly)
-            'update_notification': True  # Show update notifications
+            'shutdown_timeout': 60  # Minutes until automatic shutdown (default 1 hour)
         }
 
         # Screensaver timer and progress tracking
@@ -466,9 +440,6 @@ class ScreensaverPreferences(QMainWindow):
 
         # Ensure system tray persists - critical for after interruption
         self.ensure_system_tray_persistence()
-
-        # Initialize and schedule automatic update checks
-        self.setup_update_checker()
 
         # Initialize shutdown timer if auto-shutdown is enabled
         if self.settings.get('auto_shutdown', False):
@@ -643,7 +614,6 @@ class ScreensaverPreferences(QMainWindow):
         self.display_combo.currentTextChanged.connect(self.auto_save_settings)
 
     def create_widgets(self):
-        """Create and organize all GUI widgets into logical sections"""
         # Create the main GUI widgets
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -684,26 +654,6 @@ class ScreensaverPreferences(QMainWindow):
 
         system_row1.addStretch()
         system_layout.addLayout(system_row1)
-
-        # System checkboxes row 2 - Update settings
-        system_row2 = QHBoxLayout()
-
-        # Auto update check checkbox
-        self.auto_update_checkbox = QCheckBox("🔄 Auto Update Check")
-        self.auto_update_checkbox.setChecked(self.settings.get('auto_update_check', True))
-        self.auto_update_checkbox.setToolTip("Automatically check for Sidekick Screensaver updates monthly")
-        self.auto_update_checkbox.stateChanged.connect(self.auto_save_settings)
-        system_row2.addWidget(self.auto_update_checkbox)
-
-        # Manual update check button
-        self.check_updates_button = QPushButton("🔍 Check Now")
-        self.check_updates_button.setToolTip("Manually check for updates now")
-        self.check_updates_button.clicked.connect(self.manual_update_check)
-        self.check_updates_button.setMaximumWidth(100)
-        system_row2.addWidget(self.check_updates_button)
-
-        system_row2.addStretch()
-        system_layout.addLayout(system_row2)
 
         layout.addWidget(system_group)
 
@@ -895,17 +845,36 @@ class ScreensaverPreferences(QMainWindow):
         self.reset_button.clicked.connect(self.reset_defaults)
         action_layout.addWidget(self.reset_button)
 
-        self.apply_button = QPushButton("✅ Apply")
-        self.apply_button.setObjectName("actionButton")
-        self.apply_button.clicked.connect(self.apply_and_close)
-        self.apply_button.setToolTip("Apply settings and hide window")
-        action_layout.addWidget(self.apply_button)
+        self.close_button = QPushButton("❌ Close")
+        self.close_button.setObjectName("actionButton")
+        self.close_button.clicked.connect(self.handle_close)
+        action_layout.addWidget(self.close_button)
 
-        self.quit_button = QPushButton("🚪 Quit")
-        self.quit_button.setObjectName("actionButton")
-        self.quit_button.clicked.connect(self.quit_application)
-        self.quit_button.setToolTip("Exit application completely")
-        action_layout.addWidget(self.quit_button)
+        layout.addLayout(action_layout)
+
+        # Stretch to push everything up
+        layout.addStretch()
+
+        # Diagnostics button
+        self.diagnostics_button = QPushButton("🔧 Diagnostics")
+        self.diagnostics_button.setObjectName("matrixButton")
+        self.diagnostics_button.clicked.connect(self.run_diagnostics)
+        control_layout.addWidget(self.diagnostics_button)
+
+        layout.addLayout(control_layout)
+
+        # Action Buttons
+        action_layout = QHBoxLayout()
+
+        self.reset_button = QPushButton("🔄 Reset Defaults")
+        self.reset_button.setObjectName("actionButton")
+        self.reset_button.clicked.connect(self.reset_defaults)
+        action_layout.addWidget(self.reset_button)
+
+        self.close_button = QPushButton("❌ Close")
+        self.close_button.setObjectName("actionButton")
+        self.close_button.clicked.connect(self.handle_close)
+        action_layout.addWidget(self.close_button)
 
         layout.addLayout(action_layout)
 
@@ -1141,13 +1110,6 @@ class ScreensaverPreferences(QMainWindow):
         """Handle close button click"""
         self.close()
 
-    def apply_and_close(self):
-        """Apply settings and hide window to system tray"""
-        # Save settings first
-        self.auto_save_settings()
-        # Then hide/minimize to tray
-        self.close()
-
     def create_status_bar(self):
         """Create status bar with version and build information"""
         self.status_bar = QStatusBar()
@@ -1239,244 +1201,6 @@ class ScreensaverPreferences(QMainWindow):
             else:
                 self.tray_icon.setToolTip("Screensaver Settings")
 
-    def setup_update_checker(self):
-        """Initialize automatic update checking system"""
-        # Check if auto-update is enabled
-        if not self.settings.get('auto_update_check', True):
-            return
-
-        # Check if it's time for an update check
-        if self.should_check_for_updates():
-            # Use threading to avoid blocking the GUI
-            update_thread = threading.Thread(target=self.check_for_updates_async, daemon=True)
-            update_thread.start()
-
-        # Set up timer for periodic checks (check every hour if we missed the daily check)
-        self.update_check_timer = QTimer()
-        self.update_check_timer.timeout.connect(self.periodic_update_check)
-        self.update_check_timer.start(3600000)  # Check every hour (3600000 ms)
-        print("🔄 Automatic update checker initialized")
-
-    def should_check_for_updates(self) -> bool:
-        """Check if it's time to perform an update check"""
-        last_check = self.settings.get('last_update_check', '')
-        check_frequency = self.settings.get('update_check_frequency', 30)  # Default 30 days
-
-        if not last_check:
-            return True  # Never checked before
-
-        try:
-            last_check_date = datetime.datetime.fromisoformat(last_check)
-            days_since_check = (datetime.datetime.now() - last_check_date).days
-            return days_since_check >= check_frequency
-        except (ValueError, TypeError):
-            return True  # Invalid date format, check anyway
-
-    def periodic_update_check(self):
-        """Periodic check triggered by timer"""
-        if self.should_check_for_updates():
-            update_thread = threading.Thread(target=self.check_for_updates_async, daemon=True)
-            update_thread.start()
-
-    def check_for_updates_async(self):
-        """Check for updates in background thread"""
-        try:
-            print("🔄 Checking for Sidekick Screensaver updates...")
-
-            # Update repository information - linked to actual git repository
-            repo_url = "https://api.github.com/repos/GuyMayer/sidekick-screensaver-pi5-wayland-bookworm/releases/latest"
-            current_version = "3.0.0"  # Current version - update this when you release new versions
-
-            # Create request with user agent
-            request = urllib.request.Request(repo_url)
-            request.add_header('User-Agent', 'Sidekick-Screensaver-UpdateChecker/1.0')
-
-            # Check for internet connection and fetch latest release info
-            with urllib.request.urlopen(request, timeout=10) as response:
-                if response.getcode() == 200:
-                    data = json.loads(response.read().decode())
-                    latest_version = data.get('tag_name', '').lstrip('v')
-                    release_url = data.get('html_url', '')
-                    release_name = data.get('name', '')
-                    release_body = data.get('body', '')
-
-                    # Update last check timestamp
-                    self.settings['last_update_check'] = datetime.datetime.now().isoformat()
-                    self.save_settings()
-
-                    # Compare versions
-                    if self.is_newer_version(latest_version, current_version):
-                        # Schedule GUI update notification on main thread
-                        self.show_update_notification(latest_version, release_url, release_name, release_body)
-                    else:
-                        print(f"✅ Sidekick Screensaver is up to date (v{current_version})")
-                else:
-                    print(f"⚠️ Update check failed: HTTP {response.getcode()}")
-
-        except urllib.error.URLError as e:
-            print(f"⚠️ Update check failed: Network error - {e}")
-        except Exception as e:
-            print(f"⚠️ Update check failed: {e}")
-
-    def is_newer_version(self, latest: str, current: str) -> bool:
-        """Compare version strings to determine if latest is newer than current"""
-        try:
-            # Simple version comparison (assumes semantic versioning like 3.0.0)
-            latest_parts = [int(x) for x in latest.split('.')]
-            current_parts = [int(x) for x in current.split('.')]
-
-            # Pad shorter version with zeros
-            max_len = max(len(latest_parts), len(current_parts))
-            latest_parts.extend([0] * (max_len - len(latest_parts)))
-            current_parts.extend([0] * (max_len - len(current_parts)))
-
-            return latest_parts > current_parts
-        except (ValueError, AttributeError):
-            return False
-
-    def show_update_notification(self, version, url, name, body):
-        """Show update notification on main thread"""
-        # Use QTimer.singleShot to ensure this runs on the main thread
-        QTimer.singleShot(0, lambda: self.display_update_dialog(version, url, name, body))
-
-    def display_update_dialog(self, version, url, name, body):
-        """Display update available dialog"""
-        if not self.settings.get('update_notification', True):
-            return  # Notifications disabled
-
-        # Create a custom message box
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("🚀 Sidekick Screensaver Update Available")
-        msg_box.setIcon(QMessageBox.Icon.Information)
-
-        # Format the message
-        message = f"""
-<h3>New Version Available: v{version}</h3>
-<p><b>{name}</b></p>
-<p>A new version of Sidekick Screensaver is available!</p>
-"""
-
-        # Add release notes if available (truncate if too long)
-        if body and len(body.strip()) > 0:
-            # Truncate release notes to prevent huge dialogs
-            truncated_body = body[:500] + ("..." if len(body) > 500 else "")
-            message += f"""
-<details>
-<summary>Release Notes:</summary>
-<p style="font-family: monospace; font-size: 10px;">{truncated_body}</p>
-</details>
-"""
-
-        message += """
-<p>Would you like to open the download page?</p>
-"""
-
-        msg_box.setText(message)
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes |
-                                  QMessageBox.StandardButton.No |
-                                  QMessageBox.StandardButton.Ignore)
-
-        # Customize button text
-        yes_button = msg_box.button(QMessageBox.StandardButton.Yes)
-        yes_button.setText("🌐 Download Update")
-
-        no_button = msg_box.button(QMessageBox.StandardButton.No)
-        no_button.setText("⏭️ Remind Later")
-
-        ignore_button = msg_box.button(QMessageBox.StandardButton.Ignore)
-        ignore_button.setText("🔕 Disable Updates")
-
-        # Show system tray notification as well
-        if hasattr(self, 'tray_icon') and self.tray_icon:
-            self.tray_icon.showMessage(
-                "🚀 Update Available",
-                f"Sidekick Screensaver v{version} is now available!",
-                QSystemTrayIcon.MessageIcon.Information,
-                5000
-            )
-
-        # Handle user response
-        response = msg_box.exec()
-
-        if response == QMessageBox.StandardButton.Yes:
-            # Open download page
-            try:
-                import webbrowser
-                webbrowser.open(url)
-            except Exception as e:
-                print(f"⚠️ Failed to open browser: {e}")
-                # Fallback: show URL in a simple dialog
-                QMessageBox.information(self, "Download URL", f"Please visit: {url}")
-
-        elif response == QMessageBox.StandardButton.Ignore:
-            # Disable automatic update checks
-            self.settings['auto_update_check'] = False
-            self.save_settings()
-            QMessageBox.information(self, "Updates Disabled",
-                                  "Automatic update checks have been disabled.\n\n"
-                                  "You can re-enable them in the Settings section.")
-
-    def manual_update_check(self):
-        """Manually triggered update check"""
-        self.status_bar.showMessage("🔄 Checking for updates...")
-        update_thread = threading.Thread(target=self.manual_check_for_updates_async, daemon=True)
-        update_thread.start()
-
-    def manual_check_for_updates_async(self):
-        """Manual update check with user feedback"""
-        try:
-            print("🔄 Manual update check requested...")
-
-            repo_url = "https://api.github.com/repos/GuyMayer/sidekick-screensaver/releases/latest"
-            current_version = "3.0.0"
-
-            request = urllib.request.Request(repo_url)
-            request.add_header('User-Agent', 'Sidekick-Screensaver-UpdateChecker/1.0')
-
-            with urllib.request.urlopen(request, timeout=10) as response:
-                if response.getcode() == 200:
-                    data = json.loads(response.read().decode())
-                    latest_version = data.get('tag_name', '').lstrip('v')
-                    release_url = data.get('html_url', '')
-                    release_name = data.get('name', '')
-                    release_body = data.get('body', '')
-
-                    # Update last check timestamp
-                    self.settings['last_update_check'] = datetime.datetime.now().isoformat()
-                    self.save_settings()
-
-                    # Show result on main thread
-                    if self.is_newer_version(latest_version, current_version):
-                        QTimer.singleShot(0, lambda: self.display_update_dialog(latest_version, release_url, release_name, release_body))
-                        QTimer.singleShot(100, lambda: self.status_bar.showMessage(f"🚀 Update available: v{latest_version}"))
-                    else:
-                        def show_up_to_date():
-                            """Display up-to-date message dialog"""
-                            QMessageBox.information(
-                                self, "No Updates",
-                                f"✅ Sidekick Screensaver is up to date!\n\nCurrent version: v{current_version}")
-                        QTimer.singleShot(0, show_up_to_date)
-                        QTimer.singleShot(100, lambda: self.status_bar.showMessage("✅ No updates available"))
-                else:
-                    QTimer.singleShot(100, lambda: self.status_bar.showMessage(f"❌ Update check failed: HTTP {response.getcode()}"))
-
-        except urllib.error.URLError as e:
-            def show_network_error():
-                """Display network error dialog for update check"""
-                QMessageBox.warning(
-                    self, "Update Check Failed",
-                    f"❌ Cannot check for updates:\n\nNetwork error: {e}\n\nPlease check your internet connection.")
-            QTimer.singleShot(0, show_network_error)
-            QTimer.singleShot(100, lambda: self.status_bar.showMessage("❌ Update check failed: Network error"))
-        except Exception as e:
-            def show_general_error():
-                """Display general error dialog for update check"""
-                QMessageBox.warning(
-                    self, "Update Check Failed",
-                    f"❌ Update check failed:\n\n{e}")
-            QTimer.singleShot(0, show_general_error)
-            QTimer.singleShot(100, lambda: self.status_bar.showMessage(f"❌ Update check failed: {e}"))
-
     def show_and_raise(self):
         """Show and raise the main window"""
         self.show()
@@ -1493,17 +1217,6 @@ class ScreensaverPreferences(QMainWindow):
 
     def quit_application(self):
         """Quit the application - save settings before exit"""
-        # Ask for confirmation first
-        reply = QMessageBox.question(
-            self, "Quit Sidekick Screensaver",
-            "Are you sure you want to quit?\n\nThis will stop the screensaver system completely.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-
-        if reply != QMessageBox.StandardButton.Yes:
-            return  # User cancelled, don't quit
-
         try:
             # Save all current settings before quitting
             if hasattr(self, 'fps_combo') and self.fps_combo:
@@ -1556,8 +1269,8 @@ class ScreensaverPreferences(QMainWindow):
         except Exception as e:
             print(f"Warning: Could not save settings on quit: {e}")
 
-        if hasattr(self, 'instance_manager') and self.instance_manager:
-            self.instance_manager.release_lock()
+        if hasattr(self, 'instance_checker') and self.instance_checker:
+            self.instance_checker.cleanup()
 
         # Stop persistence timer if it exists
         if hasattr(self, 'tray_persistence_timer'):
@@ -1634,7 +1347,7 @@ class ScreensaverPreferences(QMainWindow):
         if hasattr(self, 'tray_icon') and self.tray_icon.isVisible():
             self.hide()
             self.tray_icon.showMessage(
-                "Screensaver Settings",
+                "Matrix Screensaver Settings",
                 "Application minimized to tray. Click the tray icon to restore.",
                 QSystemTrayIcon.MessageIcon.Information,
                 2000
@@ -1710,8 +1423,8 @@ class ScreensaverPreferences(QMainWindow):
                 script_path = os.path.abspath(script_path)
 
             # Clean up current instance
-            if hasattr(self, 'instance_manager') and self.instance_manager:
-                self.instance_manager.release_lock()
+            if hasattr(self, 'instance_checker') and self.instance_checker:
+                self.instance_checker.cleanup()
 
             if hasattr(self, 'tray_icon'):
                 self.tray_icon.hide()
@@ -1825,8 +1538,8 @@ class ScreensaverPreferences(QMainWindow):
                 desktop_content = f"""[Desktop Entry]
 Version=1.0
 Type=Application
-Name=Sidekick Screensaver
-Comment=Auto-start Sidekick screensaver
+Name=Matrix Screensaver
+Comment=Auto-start Matrix screensaver
 Exec={Path.home() / '.local' / 'bin' / 'wayland_sidekick_autolock.sh'}
 Icon=preferences-desktop-screensaver
 Terminal=false
@@ -2396,25 +2109,8 @@ X-GNOME-Autostart-enabled=true
         self.progress_timer.stop()
         self.screensaver_timer.stop()
 
-        # Determine screensaver type from saved settings (not GUI widgets)
-        # This ensures it works both in GUI mode and autostart/background mode
-        screensaver_type = None
-
-        if not self.settings.get('enabled', True):
-            screensaver_type = 'None'
-        elif self.settings.get('slideshow_mode', False):
-            screensaver_type = 'Slideshow'
-        elif self.settings.get('mystify_mode', False):
-            screensaver_type = 'Mystify'
-        elif self.settings.get('matrix_mode', True):
-            screensaver_type = 'Matrix'
-        else:
-            # Fallback to Matrix if no mode is set
-            screensaver_type = 'Matrix'
-
-        print(f"🎯 Determined screensaver type from settings: {screensaver_type}")
-        print(f"🔧 Settings state - matrix_mode: {self.settings.get('matrix_mode')}, mystify_mode: {self.settings.get('mystify_mode')}, slideshow_mode: {self.settings.get('slideshow_mode')}")
-
+        # Check which screensaver mode is selected
+        screensaver_type = self.safe_get_combo_text_simple(self.screensaver_type_combo, 'Matrix')
         if screensaver_type == 'Slideshow':
             self.status_bar.showMessage("🚀 Slideshow screensaver LAUNCHING...")
             self.activate_slideshow_screensaver()
@@ -2424,12 +2120,9 @@ X-GNOME-Autostart-enabled=true
         elif screensaver_type == 'Matrix':
             self.status_bar.showMessage("🚀 Matrix screensaver LAUNCHING...")
             self.activate_sidekick_screensaver()
-        elif screensaver_type == 'None':
-            self.status_bar.showMessage("⚠️ Screensaver disabled - not launching")
-            return
         else:
-            self.status_bar.showMessage("❌ No screensaver configured - defaulting to Matrix")
-            self.activate_sidekick_screensaver()
+            self.status_bar.showMessage("❌ No screensaver selected - please choose from dropdown")
+            return
 
         self.update_timer_buttons()
 
@@ -2443,20 +2136,20 @@ X-GNOME-Autostart-enabled=true
             print("🗄️ Closing all GUI applications before screensaver...")
             self.close_all_gui_applications()
 
-            # Gather current settings - use saved settings instead of GUI widgets for autostart compatibility
+            # Gather current settings
             settings = {
-                'color': self.settings.get('color', 'green') if not self.settings.get('rainbow_mode', False) else 'green',
-                'speed': self.settings.get('speed', 25),
-                'bold': self.settings.get('bold_text', True),
-                'rainbow': self.settings.get('rainbow_mode', False),
+                'color': self.safe_get_combo_text_simple(self.color_combo, 'green') if self.safe_get_combo_text_simple(self.color_combo, 'green') != 'rainbow' else 'green',
+                'speed': self.speed_slider.value(),
+                'bold': self.bold_checkbox.isChecked(),
+                'rainbow': self.safe_get_combo_text_simple(self.color_combo, 'green') == 'rainbow',
                 'font_size': self.settings.get('font_size', 14),
-                'show_stats': self.settings.get('show_stats', False),
-                'use_katakana': self.settings.get('use_katakana', True),
-                'target_fps': self.settings.get('target_fps', 15),
+                'show_stats': self.show_stats_checkbox.isChecked(),
+                'use_katakana': self.katakana_checkbox.isChecked(),
+                'target_fps': 0 if self.safe_get_combo_text_simple(self.fps_combo, '15') == 'Unlimited' else int(self.safe_get_combo_text_simple(self.fps_combo, '15')),
                 'auto_cpu_limit': self.settings.get('auto_cpu_limit', False)
             }
 
-            print(f"🔧 Matrix screensaver settings: {settings}")  # Debug
+            print(f"🔧 Screensaver settings: {settings}")  # Debug
 
             # Hide the settings window after closing other GUIs
             print("🗄️ Hiding settings window before screensaver launch...")  # Debug print
@@ -2489,14 +2182,14 @@ X-GNOME-Autostart-enabled=true
             # CLOSE ALL GUI APPLICATIONS BEFORE SCREENSAVER STARTS
             self.close_all_gui_applications()
 
-            # Gather slideshow settings - use saved settings instead of GUI widgets for autostart compatibility
+            # Gather slideshow settings
             settings = {
                 'slideshow_folder': self.settings.get('slideshow_folder', ''),
-                'slide_duration': self.settings.get('slide_duration', 5),
-                'slideshow_random': self.settings.get('slideshow_random', True),
-                'slideshow_fit_mode': self.settings.get('slideshow_fit_mode', 'contain'),
-                'show_stats': self.settings.get('show_stats', False),
-                'target_fps': self.settings.get('target_fps', 15),
+                'slide_duration': self.slide_duration_spinbox.value(),
+                'slideshow_random': self.slideshow_random_checkbox.isChecked(),
+                'slideshow_fit_mode': self.safe_get_combo_value(self.slideshow_fit_combo, ['contain', 'cover', 'stretch'], 'contain'),
+                'show_stats': self.show_stats_checkbox.isChecked(),
+                'target_fps': 0 if self.safe_get_combo_text_simple(self.fps_combo, '15') == 'Unlimited' else int(self.safe_get_combo_text_simple(self.fps_combo, '15')),
             }
 
             # Hide the settings window
@@ -2539,16 +2232,16 @@ X-GNOME-Autostart-enabled=true
             # CLOSE ALL GUI APPLICATIONS BEFORE SCREENSAVER STARTS
             self.close_all_gui_applications()
 
-            # Gather mystify settings - use saved settings instead of GUI widgets for autostart compatibility
+            # Gather mystify settings
             settings = {
-                'mystify_shapes': self.settings.get('mystify_shapes', 3),
-                'mystify_trail_length': self.settings.get('mystify_trail_length', 50),
-                'mystify_complexity': self.settings.get('mystify_complexity', 6),
-                'mystify_speed': self.settings.get('mystify_speed', 2),
-                'mystify_color_mode': self.settings.get('mystify_color_mode', 'rainbow'),
-                'mystify_fill': self.settings.get('mystify_fill', False),
-                'show_stats': self.settings.get('show_stats', False),
-                'target_fps': self.settings.get('target_fps', 15),
+                'mystify_shapes': self.safe_get_spinbox_value(self.mystify_shapes_spinbox, 3),
+                'mystify_trail_length': self.safe_get_spinbox_value(self.mystify_trail_spinbox, 50),
+                'mystify_complexity': self.safe_get_spinbox_value(self.mystify_complexity_spinbox, 6),
+                'mystify_speed': self.safe_get_spinbox_value(self.mystify_speed_spinbox, 2),
+                'mystify_color_mode': self.safe_get_combo_text(self.mystify_color_combo, ['rainbow', 'single', 'duo'], 'rainbow'),
+                'mystify_fill': self.safe_get_checkbox_value(self.mystify_fill_checkbox, False),
+                'show_stats': self.safe_get_checkbox_value(self.show_stats_checkbox, False),
+                'target_fps': 0 if self.safe_get_combo_text_simple(self.fps_combo, '15') == 'Unlimited' else int(self.safe_get_combo_text_simple(self.fps_combo, '15')),
             }
 
             # Hide the settings window
@@ -2624,7 +2317,7 @@ X-GNOME-Autostart-enabled=true
             # Method 2: Kill only screensaver preferences processes
             screensaver_apps_to_close = [
                 'screensaver_preferences.py',
-                'screensaver_preferences.py'
+                'screensaver_preferences_qt6.py'
             ]
 
             for app in screensaver_apps_to_close:
@@ -3339,10 +3032,7 @@ X-GNOME-Autostart-enabled=true
                 'mystify_fill': self.safe_get_checkbox_value(self.mystify_fill_checkbox, False),
                 # Shutdown timer settings
                 'auto_shutdown': self.safe_get_checkbox_value(self.auto_shutdown_checkbox, False),
-                'shutdown_timeout': self.safe_get_spinbox_value(self.shutdown_spinbox, 60),
-                # Update settings
-                'auto_update_check': self.safe_get_checkbox_value(self.auto_update_checkbox, True),
-                'update_notification': self.safe_get_checkbox_value(self.auto_update_checkbox, True)  # Use same checkbox for now
+                'shutdown_timeout': self.safe_get_spinbox_value(self.shutdown_spinbox, 60)
             })
 
             # Restart shutdown timer if settings changed
@@ -3409,10 +3099,7 @@ X-GNOME-Autostart-enabled=true
                 'mystify_complexity': self.safe_get_spinbox_value(self.mystify_complexity_spinbox, 6),
                 'mystify_speed': self.safe_get_spinbox_value(self.mystify_speed_spinbox, 2),
                 'mystify_color_mode': self.safe_get_combo_value(self.mystify_color_combo, ['rainbow', 'single', 'duo'], 'rainbow'),
-                'mystify_fill': self.safe_get_checkbox_value(self.mystify_fill_checkbox, False),
-                # Update settings
-                'auto_update_check': self.safe_get_checkbox_value(self.auto_update_checkbox, True),
-                'update_notification': self.safe_get_checkbox_value(self.auto_update_checkbox, True)  # Use same checkbox for now
+                'mystify_fill': self.safe_get_checkbox_value(self.mystify_fill_checkbox, False)
             })
 
             # Save settings
@@ -3435,44 +3122,44 @@ X-GNOME-Autostart-enabled=true
         display_target = self.settings.get('display_target', 'both')
 
         if display_target == 'display0':
-            display_off_cmd = "export WAYLAND_DISPLAY=wayland-0 && wlopm --off HDMI-A-1 2>/dev/null || xset -display :0 dpms force off"
-            display_on_cmd = "export WAYLAND_DISPLAY=wayland-0 && wlopm --on HDMI-A-1 2>/dev/null || xset -display :0 dpms force on"
+            display_off_cmd = "wlopm --off HDMI-A-1 2>/dev/null || xset -display :0 dpms force off"
+            display_on_cmd = "wlopm --on HDMI-A-1 2>/dev/null || xset -display :0 dpms force on"
             display_desc = "Display 0 (HDMI-A-1)"
         elif display_target == 'display1':
-            display_off_cmd = "export WAYLAND_DISPLAY=wayland-0 && wlopm --off HDMI-A-2 2>/dev/null || xset -display :1 dpms force off"
-            display_on_cmd = "export WAYLAND_DISPLAY=wayland-0 && wlopm --on HDMI-A-2 2>/dev/null || xset -display :1 dpms force on"
+            display_off_cmd = "wlopm --off HDMI-A-2 2>/dev/null || xset -display :1 dpms force off"
+            display_on_cmd = "wlopm --on HDMI-A-2 2>/dev/null || xset -display :1 dpms force on"
             display_desc = "Display 1 (HDMI-A-2)"
         else:  # both
-            display_off_cmd = "export WAYLAND_DISPLAY=wayland-0 && wlopm --off '*' 2>/dev/null || xset dpms force off"
-            display_on_cmd = "export WAYLAND_DISPLAY=wayland-0 && wlopm --on '*' 2>/dev/null || xset dpms force on"
+            display_off_cmd = "wlopm --off '*' 2>/dev/null || xset dpms force off"
+            display_on_cmd = "wlopm --on '*' 2>/dev/null || xset dpms force on"
             display_desc = "All displays"
 
         # Create the script content with enhanced touchpad activity detection
         script_content = f"""#!/bin/bash
-# Auto-generated Wayland Sidekick screensaver script
+# Auto-generated Wayland Matrix screensaver script
 # Generated by PyQt6 Screensaver Preferences GUI
 
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-SIDEKICK_WIDGET="$SCRIPT_DIR/sidekick_widget.py"
+MATRIX_SCRIPT="$SCRIPT_DIR/sidekick_screensaver.sh"
 
-# Make sure the sidekick widget is executable
-chmod +x "$SIDEKICK_WIDGET"
+# Make sure the matrix script is executable
+chmod +x "$MATRIX_SCRIPT"
 
-echo "🟢 Starting Wayland Sidekick Screensaver System..."
+echo "🟢 Starting Wayland Matrix Screensaver System..."
 echo "Settings: {self.settings['color']} color, speed {self.settings['speed']}"
 echo "Target: {display_desc}"
 echo "Timeline:"
 echo "  0-{self.settings['lock_timeout']//60} min:  Normal desktop"
-echo "  {self.settings['lock_timeout']//60}-{self.settings['display_timeout']//60} min: Sidekick digital rain"
+echo "  {self.settings['lock_timeout']//60}-{self.settings['display_timeout']//60} min: Matrix digital rain"
 echo "  {self.settings['display_timeout']//60}+ min:  Screen off (power saving)"
 echo ""
 
 # The complete recipe with user settings and enhanced activity detection
 swayidle -w \\
-    timeout {self.settings['lock_timeout']} "echo 'Entering the Sidekick...' && python3 $SIDEKICK_WIDGET" \\
-    timeout {self.settings['display_timeout']} "echo 'Powering down {display_desc.lower()}...' && pkill -f sidekick_widget.py; pkill -f python3.*sidekick; {display_off_cmd}" \\
-    resume "echo 'Exiting the Sidekick...' && pkill -f sidekick_widget.py; pkill -f python3.*sidekick; {display_on_cmd}" \\
-    before-sleep "echo 'System sleeping - killing Sidekick...' && pkill -f sidekick_widget.py; pkill -f python3.*sidekick; {display_off_cmd}"
+    timeout {self.settings['lock_timeout']} "echo 'Entering the Matrix...' && $MATRIX_SCRIPT" \\
+    timeout {self.settings['display_timeout']} "echo 'Powering down {display_desc.lower()}...' && pkill -f sidekick_widget; pkill -f mystify_widget; pkill -f slideshow_widget; {display_off_cmd}" \\
+    resume "echo 'Exiting the Matrix...' && pkill -f sidekick_widget; pkill -f mystify_widget; pkill -f slideshow_widget; {display_on_cmd}" \\
+    before-sleep "echo 'System sleeping - killing Matrix...' && pkill -f sidekick_widget; pkill -f mystify_widget; pkill -f slideshow_widget; {display_off_cmd}"
 """
 
         # Write the script
@@ -3487,11 +3174,235 @@ swayidle -w \\
         self.update_matrix_script()
 
     def update_matrix_script(self):
-        """Update the sidekick widget command with current settings"""
-        # No separate script needed - sidekick_widget.py runs directly with settings
-        # The settings are passed through the GUI's settings when the widget is launched
-        # This function is now a placeholder since we run the Python widget directly
-        pass
+        """Update the sidekick_screensaver.sh script with enhanced activity detection"""
+        script_path = Path.home() / '.local' / 'bin' / 'sidekick_screensaver.sh'
+
+        # Build the cmatrix command with current settings
+        cmd_parts = ['cmatrix']
+
+        # Add flags based on settings
+        if self.settings.get('async_scroll', True):
+            cmd_parts.append('-a')
+        if self.settings.get('bold_text', True):
+            cmd_parts.append('-b')
+
+        cmd_parts.extend(['-f', '-s'])  # Force Linux mode, screensaver mode
+
+        # Add color (or rainbow mode)
+        if self.settings.get('rainbow_mode', False):
+            cmd_parts.append('-r')  # Rainbow mode
+        else:
+            cmd_parts.extend(['-C', self.settings.get('color', 'green')])
+
+        # Add speed (reverse for cmatrix: stored value 0=slowest, 50=fastest becomes high delay to low delay for cmatrix -u)
+        reversed_speed = 50 - self.settings.get('speed', 25)  # Default to middle speed
+        cmd_parts.extend(['-u', str(reversed_speed)])
+
+        # Create the matrix script content with enhanced activity detection
+        display_target = self.settings.get('display_target', 'both')
+
+        if display_target == 'display0':
+            display_env = "DISPLAY=:0"
+            display_desc = "Display 0"
+        elif display_target == 'display1':
+            display_env = "DISPLAY=:1"
+            display_desc = "Display 1"
+        else:  # both
+            display_env = ""
+            display_desc = "All displays"
+
+        script_content = f"""#!/bin/bash
+# Matrix screensaver script with enhanced activity detection including touchpad
+# Auto-generated by PyQt6 Screensaver Preferences GUI
+
+echo "🟢💚 Starting Matrix Digital Rain on {display_desc}..."
+
+# Check if we should only run on physical screens
+PHYSICAL_ONLY={str(self.settings.get('physical_only', True)).lower()}
+
+if [ "$PHYSICAL_ONLY" = "true" ]; then
+    # Check if this is a physical session (not SSH/VNC)
+    if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ] || [ -n "$VNC_DESKTOP" ] || [ "$XDG_SESSION_TYPE" = "tty" ]; then
+        echo "🚫 Skipping Matrix - not running on physical display"
+        exit 0
+    fi
+
+    # Additional check for local display
+    if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+        echo "🚫 Skipping Matrix - no local display detected"
+        exit 0
+    fi
+
+    echo "✅ Physical display confirmed - proceeding with Matrix..."
+fi
+
+# Function to cleanup on exit
+cleanup() {{
+    pkill -f "cmatrix" 2>/dev/null
+    exit 0
+}}
+
+# Set up signal handlers for cleanup
+trap cleanup SIGTERM SIGINT SIGQUIT
+
+# Create a temporary script for the matrix effect with enhanced activity detection
+TEMP_SCRIPT="/tmp/matrix_$$"
+cat > "$TEMP_SCRIPT" << 'MATRIX_EOF'
+#!/bin/bash
+# Maximized matrix terminal script with enhanced activity detection
+
+# Enhanced function to detect ALL input activity including touchpad
+activity_monitor() {{
+    while true; do
+        # Method 1: Check /proc/interrupts for hardware activity
+        if [ -f /proc/interrupts ]; then
+            INITIAL_ACTIVITY=$(grep -E "(keyboard|mouse|i8042|usb|input|touchpad|synaptics)" /proc/interrupts 2>/dev/null | awk '{{sum+=$2}} END {{print sum+0}}')
+            sleep 0.5
+            CURRENT_ACTIVITY=$(grep -E "(keyboard|mouse|i8042|usb|input|touchpad|synaptics)" /proc/interrupts 2>/dev/null | awk '{{sum+=$2}} END {{print sum+0}}')
+
+            if [ "$CURRENT_ACTIVITY" -gt "$INITIAL_ACTIVITY" ] 2>/dev/null; then
+                # Activity detected - exit immediately
+                pkill -f cmatrix 2>/dev/null
+                sleep 0.1
+                exit 0
+            fi
+        fi
+
+        # Method 2: Monitor input devices directly (includes touchpad events)
+        for input_dev in /dev/input/event*; do
+            if [ -c "$input_dev" ]; then
+                # Check device name to include touchpad devices
+                DEVICE_NAME=$(cat "/sys/class/input/$(basename $input_dev)/device/name" 2>/dev/null || echo "")
+
+                # Check for any input activity (keyboard, mouse, touchpad, touch)
+                if echo "$DEVICE_NAME" | grep -qiE "(keyboard|mouse|touchpad|touch|synaptics|alps|elan)"; then
+                    if timeout 0.1s cat "$input_dev" >/dev/null 2>&1; then
+                        # Input detected - exit immediately
+                        pkill -f cmatrix 2>/dev/null
+                        sleep 0.1
+                        exit 0
+                    fi
+                fi
+            fi
+        done
+
+        # Method 3: Check for mouse position changes
+        if command -v xdotool >/dev/null 2>&1; then
+            MOUSE_POS=$(xdotool getmouselocation 2>/dev/null | cut -d' ' -f1-2)
+            if [ -n "$PREV_MOUSE_POS" ] && [ "$MOUSE_POS" != "$PREV_MOUSE_POS" ]; then
+                # Mouse moved - exit immediately
+                pkill -f cmatrix 2>/dev/null
+                sleep 0.1
+                exit 0
+            fi
+            PREV_MOUSE_POS="$MOUSE_POS"
+        fi
+
+        # Method 4: Check xinput for touchpad/pointer events (if available)
+        if command -v xinput >/dev/null 2>&1; then
+            # Get list of pointer devices (includes touchpads)
+            POINTER_DEVICES=$(xinput list --short | grep -i "pointer" | grep -iE "(touchpad|mouse|synaptics)" | cut -d'=' -f2 | cut -d'[' -f1)
+            for device_id in $POINTER_DEVICES; do
+                if [ -n "$device_id" ]; then
+                    # Test device activity (this will return immediately if no activity)
+                    if timeout 0.1s xinput test "$device_id" >/dev/null 2>&1; then
+                        pkill -f cmatrix 2>/dev/null
+                        sleep 0.1
+                        exit 0
+                    fi
+                fi
+            done
+        fi
+
+        sleep 0.3  # Check frequently for responsive exit
+    done
+}}
+
+# Start activity monitor in background
+activity_monitor &
+MONITOR_PID=$!
+
+# Cleanup function for the terminal
+cleanup_terminal() {{
+    kill $MONITOR_PID 2>/dev/null
+    pkill -f cmatrix 2>/dev/null
+    # Auto-close terminal without prompting
+    sleep 0.2
+    exit 0
+}}
+
+trap cleanup_terminal SIGTERM SIGINT SIGQUIT
+
+# Run matrix effect
+{' '.join(cmd_parts)}
+
+# If cmatrix exits normally, cleanup and close terminal immediately
+cleanup_terminal
+MATRIX_EOF
+
+chmod +x "$TEMP_SCRIPT"
+
+# Find a suitable terminal and run fullscreen/maximized
+TERMINAL_FOUND=false
+
+# Try different terminals with fullscreen/maximized flags
+for term_cmd in \\
+    "lxterminal --command" \\
+    "xterm -fullscreen -e" \\
+    "gnome-terminal --full-screen -- bash" \\
+    "konsole --fullscreen -e bash" \\
+    "x-terminal-emulator -e bash"; do
+
+    TERM_NAME=$(echo "$term_cmd" | awk '{{print $1}}')
+    if command -v "$TERM_NAME" >/dev/null 2>&1; then
+        echo "🖥️ Using $TERM_NAME for Matrix screensaver..."
+
+        if [[ "$term_cmd" == *"lxterminal"* ]]; then
+            # Special handling for lxterminal to get true fullscreen without title bar
+            {display_env} lxterminal --geometry=999x999+0+0 --command="bash $TEMP_SCRIPT" --title="cmatrix Terminal" &
+            TERMINAL_PID=$!
+
+            # Wait for terminal to open then maximize it
+            sleep 1
+            if command -v wmctrl >/dev/null 2>&1; then
+                wmctrl -r "Matrix Screensaver" -b add,fullscreen 2>/dev/null || \\
+                wmctrl -r "Matrix Screensaver" -b add,maximized_vert,maximized_horz 2>/dev/null
+            elif command -v xdotool >/dev/null 2>&1; then
+                xdotool search --name "Matrix Screensaver" windowstate --add FULLSCREEN 2>/dev/null || \\
+                xdotool search --name "Matrix Screensaver" windowstate --add MAXIMIZED_VERT MAXIMIZED_HORZ 2>/dev/null
+            fi
+        else
+            {display_env} $term_cmd "$TEMP_SCRIPT" &
+            TERMINAL_PID=$!
+        fi
+
+        TERMINAL_FOUND=true
+        break
+    fi
+done
+
+if [ "$TERMINAL_FOUND" = false ]; then
+    echo "⚠️ No suitable terminal found, running Matrix in current session..."
+    {display_env} bash "$TEMP_SCRIPT" &
+    TERMINAL_PID=$!
+fi
+
+# Wait for the terminal to finish
+wait $TERMINAL_PID 2>/dev/null
+
+# Cleanup temp script
+rm -f "$TEMP_SCRIPT"
+
+# Silent exit - no end message
+"""
+
+        # Write the script
+        script_path.parent.mkdir(exist_ok=True)
+        with open(script_path, 'w') as f:
+            f.write(script_content)
+
+        # Make executable
+        script_path.chmod(0o755)
 
     def reset_defaults(self):
         """Reset all settings to defaults"""
@@ -3545,32 +3456,30 @@ swayidle -w \\
 def main():
     """Main entry point"""
     import argparse
+    import json
     from pathlib import Path
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Screensaver Preferences')
+    parser = argparse.ArgumentParser(description='Matrix Screensaver Preferences')
     parser.add_argument('--autostart', action='store_true',
                        help='Start in background mode for autostart (no GUI)')
     parser.add_argument('--test', action='store_true',
                        help='Test mode for development')
     args = parser.parse_args()
 
-    # Check for single instance using the professional SingleInstance manager
-    try:
-        instance_manager = ensure_single_instance("screensaver_preferences_gui", exit_on_conflict=False)
-        if not instance_manager.is_locked:
-            if not args.autostart:  # Only show message if not autostart
-                print("Screensaver Preferences is already running!")
-                # Try to bring existing window to front
-                try:
-                    subprocess.run(['wmctrl', '-a', 'Screensaver Preferences'],
-                                  check=False, capture_output=True, timeout=2)
-                except:
-                    pass
-            sys.exit(0)
-    except Exception as e:
-        print(f"⚠️ Single instance check failed: {e}")
-        print("ℹ️ Continuing with potential multiple instances")
+    # Check for single instance first
+    instance_checker = SingleInstanceChecker()
+
+    if instance_checker.is_already_running():
+        if not args.autostart:  # Only show message if not autostart
+            print("Screensaver Preferences is already running!")
+            # Try to bring existing window to front
+            try:
+                subprocess.run(['wmctrl', '-a', 'Screensaver Preferences'],
+                              check=False, capture_output=True, timeout=2)
+            except:
+                pass
+        sys.exit(0)
 
     app = QApplication(sys.argv)
 
@@ -3646,32 +3555,31 @@ def main():
     except:
         pass  # Ignore if icon theme not available
 
-    # Cleanup on exit - the SingleInstance manager will auto-cleanup via atexit
+    # Create lock for this instance
+    instance_checker.create_lock()
+
+    # Cleanup on exit
     def cleanup_on_exit():
-        """Clean up instance manager when application exits"""
-        if hasattr(instance_manager, 'release_lock'):
-            instance_manager.release_lock()
+        """Clean up instance checker when application exits"""
+        instance_checker.cleanup()
 
     app.aboutToQuit.connect(cleanup_on_exit)
 
     # Create and show the main window
     window = ScreensaverPreferences()
 
-    # Store instance manager in window for reference
-    window.instance_manager = instance_manager
+    # Store instance checker in window for cleanup
+    window.instance_checker = instance_checker
 
     # Handle autostart mode
     if args.autostart:
-        print("🚀 Starting in autostart mode (background monitoring with system tray)")
-        # Start system tray even in autostart mode for user control
-        window.setup_system_tray()
-
-        # Don't show the main GUI, just start background monitoring
+        print("🚀 Starting in autostart mode (background monitoring)")
+        # Don't show the GUI, just start background monitoring
         if window.settings.get('enabled', True):
             window.start_automatic_monitoring()
-            print("✅ Background monitoring started with system tray")
+            print("✅ Background monitoring started")
         else:
-            print("⚠️ Screensaver disabled - system tray available for settings")
+            print("⚠️ Screensaver disabled - no monitoring started")
     else:
         # Normal mode - show the GUI
         window.show()

@@ -141,10 +141,11 @@ class MatrixWidget(QWidget):
             'bold': True,
             'rainbow': False,
             'font_size': 14,
-            'show_stats': False,
+            'show_stats': True,  # Enable stats by default
             'use_katakana': True,
-            'target_fps': 30,  # Default FPS - reduced for better performance
-            'auto_cpu_limit': False  # Auto CPU limiting
+            'target_fps': 15,  # Default FPS - optimized for CPU efficiency
+            'auto_cpu_limit': True,  # Enable auto CPU limiting by default
+            'stats_drift': True  # Enable stats drift to prevent burn-in
         }
 
         # Animation state
@@ -156,8 +157,10 @@ class MatrixWidget(QWidget):
         # CPU monitoring for auto limit
         self.cpu_samples: List[float] = []
         self.last_cpu_check = time.time()
-        self.current_target_fps = self.settings.get('target_fps', 30)
+        self.current_target_fps = self.settings.get('target_fps', 15)
         self.min_fps = 15  # Never go below 15 FPS
+        self.max_fps = 30  # Cap at 30 FPS for efficiency (mystify uses 60)
+        self.cpu_threshold = 40.0  # If CPU > 40%, reduce FPS
 
         # Stats display averaging and timing
         self.stats_cpu_samples: List[float] = []
@@ -423,7 +426,7 @@ class MatrixWidget(QWidget):
 
                     # Get screensaver process stats
                     current_process = psutil.Process(os.getpid())
-                    process_cpu = current_process.cpu_percent()
+                    process_cpu = current_process.cpu_percent(interval=0.1)
                     process_memory = current_process.memory_info()
                     process_memory_mb = process_memory.rss / 1024 / 1024  # Convert to MB
 
@@ -456,8 +459,8 @@ class MatrixWidget(QWidget):
                 painter.setPen(QPen(stats_color))
 
                 # Format CPU percentages with 2 decimal places, show "<1%" if 0.00
-                total_cpu_text = f"{self.displayed_cpu:.2f}%" if self.displayed_cpu > 0.00 else "<1%"
-                screensaver_cpu_text = f"{self.displayed_process_cpu:.2f}%" if self.displayed_process_cpu > 0.00 else "<1%"
+                total_cpu_text = f"{self.displayed_cpu:.1f}%"
+                screensaver_cpu_text = f"{self.displayed_process_cpu:.1f}%"
 
                 painter.drawText(QPoint(stats_x, stats_y + self.stats_line_height), f"CPU Total {total_cpu_text} Screensaver {screensaver_cpu_text}")
                 painter.drawText(QPoint(stats_x, stats_y + 2 * self.stats_line_height), f"Memory Total {self.displayed_memory}% Screensaver {self.displayed_process_memory:.1f}MB")

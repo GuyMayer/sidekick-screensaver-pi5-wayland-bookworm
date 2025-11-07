@@ -313,7 +313,7 @@ class MystifyWidget(QWidget):
                 # Get process-specific stats
                 try:
                     process = psutil.Process(os.getpid())
-                    process_cpu = process.cpu_percent()
+                    process_cpu = process.cpu_percent(interval=0.1)
                     process_memory_info = process.memory_info()
                     process_memory_mb = process_memory_info.rss / (1024 * 1024)  # Convert to MB
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -604,8 +604,8 @@ class MystifyWidget(QWidget):
                 painter.drawText(stats_x, stats_y, f"FPS {self.fps:.0f} (Target {target_fps})")
 
             # Format CPU percentages with 2 decimal places, show "<1%" if 0.00
-            total_cpu_text = f"{self.displayed_cpu:.2f}%" if self.displayed_cpu > 0.00 else "<1%"
-            screensaver_cpu_text = f"{self.displayed_process_cpu:.2f}%" if self.displayed_process_cpu > 0.00 else "<1%"
+            total_cpu_text = f"{self.displayed_cpu:.1f}%"
+            screensaver_cpu_text = f"{self.displayed_process_cpu:.1f}%"
 
             painter.drawText(stats_x, stats_y + self.stats_line_height, f"CPU Total {total_cpu_text} Screensaver {screensaver_cpu_text}")
             painter.drawText(stats_x, stats_y + 2 * self.stats_line_height, f"Memory Total {self.displayed_memory}% Screensaver {self.displayed_process_memory:.1f}MB")

@@ -165,6 +165,26 @@ class MatrixWidget(QWidget):
         # Stats display averaging and timing
         self.stats_cpu_samples: List[float] = []
         self.last_stats_update = time.time()
+        
+        # Create persistent process object for CPU monitoring (CRITICAL FIX)
+        # Creating new Process() each time causes cpu_percent() to return 0.0
+        try:
+            import psutil
+            import os
+            self.current_process = psutil.Process(os.getpid())
+            self.current_process.cpu_percent()  # Baseline call (first call returns 0.0)
+        except ImportError:
+            self.current_process = None
+        
+        # Create persistent process object for CPU monitoring (CRITICAL FIX)
+        # Creating new Process() each time causes cpu_percent() to return 0.0
+        try:
+            import psutil
+            import os
+            self.current_process = psutil.Process(os.getpid())
+            self.current_process.cpu_percent()  # Baseline call (first call returns 0.0)
+        except ImportError:
+            self.current_process = None
         self.displayed_cpu = 0.0  # Initialize as float for 2 decimal precision
         self.displayed_memory = 0
         self.displayed_process_cpu = 0.0  # Initialize as float for 2 decimal precision
@@ -425,8 +445,7 @@ class MatrixWidget(QWidget):
                     memory = psutil.virtual_memory()
 
                     # Get screensaver process stats
-                    current_process = psutil.Process(os.getpid())
-                    process_cpu = current_process.cpu_percent(interval=0.1)
+                    process_cpu = self.current_process.cpu_percent() if self.current_process else 0.0
                     process_memory = current_process.memory_info()
                     process_memory_mb = process_memory.rss / 1024 / 1024  # Convert to MB
 

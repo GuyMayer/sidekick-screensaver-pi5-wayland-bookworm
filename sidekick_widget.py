@@ -446,8 +446,8 @@ class MatrixWidget(QWidget):
 
                     # Get screensaver process stats
                     process_cpu = self.current_process.cpu_percent() / psutil.cpu_count() if self.current_process else 0.0
-                    process_memory = current_process.memory_info()
-                    process_memory_mb = process_memory.rss / 1024 / 1024  # Convert to MB
+                    process_memory_info = self.current_process.memory_info() if self.current_process else None
+                    process_memory_mb = (process_memory_info.rss / 1024 / 1024) if process_memory_info else 0.0  # Convert to MB
 
                     # Calculate process memory percentage of total system memory
                     total_memory_gb = memory.total / 1024 / 1024 / 1024

@@ -445,7 +445,6 @@ class MystifyWidget(QWidget):
         # PERFORMANCE: Frame skipping DISABLED for smooth animation
         self.skip_frame_counter += 1
         # Frame skipping disabled - always render every frame
-        debug_logger.debug(f"Frame {self.skip_frame_counter} - NO SKIPPING (smooth mode)")
 
         # PERFORMANCE: Track frame timing for adaptive quality
         self.frame_times.append(delta_time)

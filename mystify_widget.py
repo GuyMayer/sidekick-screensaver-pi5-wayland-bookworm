@@ -332,9 +332,9 @@ class MystifyWidget(QWidget):
 
                 # Get process-specific stats
                 try:
-                    process_cpu = self.current_process.cpu_percent() if self.current_process else 0.0
-                    process_memory_info = process.memory_info()
-                    process_memory_mb = process_memory_info.rss / (1024 * 1024)  # Convert to MB
+                    process_cpu = self.current_process.cpu_percent() / psutil.cpu_count() if self.current_process else 0.0
+                    process_memory_info = self.current_process.memory_info() if self.current_process else None
+                    process_memory_mb = (process_memory_info.rss / (1024 * 1024)) if process_memory_info else 0.0  # Convert to MB
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     process_cpu = 0.0
                     process_memory_mb = 0.0

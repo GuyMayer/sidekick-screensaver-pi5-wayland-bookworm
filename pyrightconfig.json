@@ -1,0 +1,10 @@
+{
+    "include": [
+        "screensaver_preferences_v4.py"
+    ],
+    "reportGeneralTypeIssues": "none",
+    "reportOptionalMemberAccess": "none",
+    "reportOptionalCall": "none",
+    "reportUnknownMemberType": "none",
+    "reportUnknownVariableType": "none"
+}

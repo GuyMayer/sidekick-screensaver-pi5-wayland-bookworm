@@ -1,5 +1,9 @@
 # .gitignore for Sidekick Screensaver
 
+# Legacy and backup folders
+*legacy*/
+legacy/
+
 # Python
 __pycache__/
 *.py[cod]

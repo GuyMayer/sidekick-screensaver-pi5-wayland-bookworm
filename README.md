@@ -31,6 +31,8 @@ A modern, feature-rich screensaver system for Linux with PyQt6 GUI, multiple scr
 - **Intelligent FPS Throttling** - Automatic performance adjustment
 
 ### 🔧 System Integration
+- **Complete Settings Persistence** - All preferences persist across reboots
+- **Auto-regenerating Scripts** - Autolock script updates automatically on Apply
 - **System Tray Persistence** - Remains accessible after interruptions
 - **Auto-start Support** - Launches with system boot
 - **USB Activity Detection** - Instant exit on mouse/keyboard activity
@@ -77,7 +79,7 @@ If Sidekick Screensaver has been useful to you, consider supporting its developm
 <a href="https://ko-fi.com/guymayer">
   <img src="https://img.shields.io/badge/Support-Ko--fi-orange?style=for-the-badge&logo=kofi" alt="Ko-fi"/>
 </a>
-<a href="https://buymeacoffee.com/guymayer">
+<a href="https://buymeacoffee.com/studiomailt">
   <img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-yellow?style=for-the-badge&logo=buymeacoffee" alt="Buy Me A Coffee"/>
 </a>
 <a href="https://paypal.me/guymayer">
@@ -94,12 +96,18 @@ Your support helps maintain and improve this project! ☕ Even a small coffee do
 - `verify_show_stats_installation.sh` - Verify stats feature
 
 ### Screensaver Engine
-- `sidekick_widget.py` - Core Matrix screensaver with USB detection
-- `screensaver_preferences.py` - PyQt6 GUI application
+- `sidekick_widget.py` - Matrix screensaver with USB detection
 - `mystify_widget.py` - Geometric patterns screensaver
-- `slideshow_widget.py` - Slideshow screensaver component
+- `slideshow_widget.py` - Slideshow screensaver
+- `video_widget.py` - Video player screensaver
+- `screensaver_preferences.py` - PyQt6 GUI application
+- `regenerate_autolock_script.py` - Autolock script generator
 - `sidekick_screensaver.sh` - Screensaver launcher
-- `wayland_sidekick_autolock.sh` - Autostart integration
+- `wayland_sidekick_autolock.sh` - Auto-generated autostart script
+
+### Configuration
+- `~/.config/screensaver/settings.json` - Persistent settings storage
+- Auto-regenerates on Apply to ensure correct screensaver launches
 
 ### Utility Scripts
 - `close_all_guis.sh` - Close all GUI instances

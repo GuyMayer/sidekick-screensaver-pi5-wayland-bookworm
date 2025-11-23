@@ -1,0 +1,18 @@
+#!/bin/bash
+# Show the screensaver preferences window if running
+
+PID=$(pgrep -f "screensaver_preferences_v4.py")
+
+if [ -z "$PID" ]; then
+    # Not running - start it
+    exec ~/.local/bin/screensaver_preferences_v4.py
+else
+    # Try to show window using wmctrl
+    if wmctrl -l | grep -qi "screensaver"; then
+        wmctrl -a "Screensaver" -b add,maximized_vert,maximized_horz
+        echo "Maximized existing Screensaver window"
+    else
+        # Window hidden/minimized - send SIGUSR1 as fallback
+        kill -SIGUSR1 $PID 2>/dev/null || echo "Window is running but hidden in tray"
+    fi
+fi

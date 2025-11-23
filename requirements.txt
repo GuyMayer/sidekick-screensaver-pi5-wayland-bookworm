@@ -1,4 +1,21 @@
-PyQt6>=6.0.0
-psutil>=5.8.0
-qdarkstyle>=3.0.0
-qdarktheme>=2.0.0
+# Sidekick Screensaver System Requirements
+# Python 3.11+ required (Raspberry Pi 5)
+
+# NOTE: PyQt6 is installed via apt on Raspberry Pi OS:
+#   sudo apt install python3-pyqt6 python3-pyqt6.qtmultimedia python3-pyqt6.qtsvg
+# DO NOT pip install PyQt6 - use system packages for better compatibility
+
+# System monitoring (used by all widgets for stats overlay)
+psutil>=5.9.0
+
+# Video generation with OpenCV (generate_matrix_video_opencv.py)
+opencv-python>=4.8.0
+numpy>=1.24.0,<2.0.0
+
+# Note: The following are NOT currently used but left commented for future features:
+# qdarkstyle>=3.2.0        # Dark theme - replaced with custom CSS
+# pyqtdarktheme>=2.1.0     # Dark theme - replaced with custom CSS
+# python-vlc>=3.0.0        # VLC Python bindings - we use cvlc command-line instead
+# Pillow>=10.0.0           # Image processing - using PyQt6 QPixmap instead
+# requests>=2.31.0         # HTTP requests for updates
+# websockets>=12.0         # WebSocket support for remote control

@@ -61,7 +61,7 @@ echo ""
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 export WAYLAND_DISPLAY=wayland-0
 swayidle -w \
-    timeout 300 "echo 'Entering the Sidekick...' && cd '$SCRIPT_DIR' && python3 sidekick_widget.py" \
-    timeout 600 "echo 'Powering down all displays...' && pkill -f sidekick_widget.py; pkill -f mystify_widget.py; pkill -f slideshow_widget.py; export WAYLAND_DISPLAY=wayland-0 && wlopm --off '*' 2>/dev/null || xset dpms force off" \
-    resume "echo 'Exiting the Sidekick...' && pkill -f sidekick_widget.py; pkill -f mystify_widget.py; pkill -f slideshow_widget.py; export WAYLAND_DISPLAY=wayland-0 && wlopm --on '*' 2>/dev/null || xset dpms force on" \
-    before-sleep "echo 'System sleeping - killing Sidekick...' && pkill -f sidekick_widget.py; pkill -f mystify_widget.py; pkill -f slideshow_widget.py; export WAYLAND_DISPLAY=wayland-0 && wlopm --off '*' 2>/dev/null || xset dpms force off"
+    timeout 300 "echo 'Entering the Sidekick...' && cd '$SCRIPT_DIR' && bash sidekick_screensaver.sh" \
+    timeout 600 "echo 'Powering down all displays...' && pkill -f sidekick_widget.py; pkill -f mystify_widget.py; pkill -f slideshow_widget.py; pkill -f video_widget.py; export WAYLAND_DISPLAY=wayland-0 && wlopm --off '*' 2>/dev/null || xset dpms force off" \
+    resume "echo 'Exiting the Sidekick...' && pkill -f sidekick_widget.py; pkill -f mystify_widget.py; pkill -f slideshow_widget.py; pkill -f video_widget.py; export WAYLAND_DISPLAY=wayland-0 && wlopm --on '*' 2>/dev/null || xset dpms force on" \
+    before-sleep "echo 'System sleeping - killing Sidekick...' && pkill -f sidekick_widget.py; pkill -f mystify_widget.py; pkill -f slideshow_widget.py; pkill -f video_widget.py; export WAYLAND_DISPLAY=wayland-0 && wlopm --off '*' 2>/dev/null || xset dpms force off"
